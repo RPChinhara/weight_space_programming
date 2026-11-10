@@ -1,0 +1,33 @@
+{
+ "gsm8k_train": {
+  "total": 7473,
+  "exact_match_math500": 0,
+  "normalized_match_heldout": 0,
+  "13gram_overlap_heldout": 4,
+  "no_answer": 0,
+  "kept": 7469
+ },
+ "math_train": {
+  "total": 7500,
+  "exact_match_math500": 0,
+  "normalized_match_heldout": 0,
+  "13gram_overlap_heldout": 91,
+  "no_answer": 2,
+  "kept": 7407
+ },
+ "aime": {
+  "total": 90,
+  "exact_match_math500": 0,
+  "normalized_match_heldout": 0,
+  "13gram_overlap_heldout": 0,
+  "no_answer": 0,
+  "kept": 90
+ },
+ "after_removal_exact_match_math500": 0,
+ "after_removal_normalized_match_heldout": 0,
+ "heldout_sizes": {
+  "math500": 500,
+  "gsm8k_test": 1319,
+  "ifeval": 541
+ }
+}

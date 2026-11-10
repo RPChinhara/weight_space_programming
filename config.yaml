@@ -1,0 +1,108 @@
+# Weight-space programming with small editors. All hyperparameters live here.
+# FROZEN after Milestone 1 (see NOTES.md): sampling, max_tokens, splits, budgets, seeds.
+# Any later change must be logged in NOTES.md with a reason, and all affected conditions rerun.
+
+frozen: false          # set to true at the end of Milestone 1
+
+paths:
+  target_src: assets/models/Qwen3.5-0.8B           # as downloaded (Qwen3_5ForConditionalGeneration, VL wrapper)
+  target: work/models/Qwen3.5-0.8B-text            # text-only export built from target_src (same as MIT's eval)
+  editors:
+    4B: assets/models/Qwen3.5-4B
+    9B: assets/models/Qwen3.5-9B
+  gemma: assets/models/gemma-3-270m
+  data: assets/data
+  practice: work/data/practice                     # built by `evaluate.py prepare`
+  heldout: work/data/heldout                       # never visible to the editor sandbox
+  results: results
+  work: work
+  cuda_home: /usr/local/cuda    # system /usr/bin/nvcc is CUDA 11.5; FlashInfer JIT needs >= 12.8 for SM 120
+
+# ---- Target evaluation protocol: MIT "think35" (lm_understand-logs/exp8_math/code/{evaluate,profiles}.py) ----
+target_eval:
+  thinking: true
+  instruction: "Please reason step by step, and put your final answer within \\boxed{}."
+  sampling: {temperature: 0.6, top_p: 0.95, top_k: 20, min_p: 0.0, presence_penalty: 1.5}
+  max_tokens: 32768
+  seed: 0                     # per-request seed = hash(seed, problem id, sample index): same draws for every checkpoint
+  samples: {math500: 4, gsm8k_test: 2, ifeval: 2}
+  vllm: {gpu_memory_utilization: 0.88, max_model_len: 34816, max_num_seqs: 256}
+  vllm_with_editor: {gpu_memory_utilization: 0.52}   # when an editor server shares the GPU
+
+# ---- Editor (agent) settings ----
+editor:
+  thinking: true              # Qwen3.5-4B / 9B as downloaded are hybrid thinking models; thinking mode used
+  sampling: {temperature: 0.6, top_p: 0.95, top_k: 20, min_p: 0.0, presence_penalty: 0.0}   # model card: thinking, precise coding
+  max_tokens_per_turn: 12000
+  max_model_len: 65536
+  gpu_memory_utilization: 0.36
+  port: 8011
+  max_turns: 160              # hard stop on conversation turns (replies without code count as turns)
+  max_run_hours: 16           # wall-clock safety stop per run (MIT's 50-pass run took 20.3 h on faster hardware); end_reason time_limit
+  output_chars: 6000          # stdout returned to the editor per execution is truncated to this
+  context_keep_last: 8        # when the context is full: keep system + task + last N exchanges
+
+budget:
+  eval_calls: 50
+  eval_max_ids: 512
+  python_execs: 80
+  forward_max_texts: 64
+  forward_max_tokens_per_text: 4096
+  forward_max_total_tokens: 65536
+
+sandbox:
+  frozen_tensors:            # MIT rule: final norm, embeddings / output layer cannot be edited
+    - model.language_model.norm.weight
+    - model.language_model.embed_tokens.weight
+  refuse_whole_tensor_rescale: true
+  allowed_imports: [math, numpy, torch, itertools, collections, functools, statistics, json, re, random, heapq, operator]
+
+seeds: [0, 1, 2, 3, 4]
+scaffolds: [L0, L1]
+editor_sizes: [4B, 9B]
+
+# ---- Data splits ----
+data:
+  decontam_ngram: 13          # also drop practice problems sharing a 13-word window with a held-out problem (as MIT)
+
+# ---- Scripted baselines (baselines.py) ----
+scripted:
+  collect_ids: 512            # practice problems generated once with the base model (1 sample each) to find loops
+  collect_seed: 1000
+  window_tokens: 1024         # activations are read on the last N tokens of each generation
+  max_texts_per_class: 128
+  n_cols: 64                  # columns of mlp.down_proj edited per layer (MIT p50c)
+  n_layers: 2                 # layers edited (MIT p50c: 15 and 19)
+  candidate_layers: 6         # top layers by practice separation, paired and screened by practice generation
+  screen_ids: 256             # practice problems per screening pass
+  screen_seed: 2000
+  alpha: 1.0                  # W' = W - alpha * u u^T W on the chosen columns
+random_edit:
+  seed: 0                     # random unit direction + random 64 columns in the same layers, Frobenius-norm matched
+mathneuro:
+  math_texts: 256
+  general_texts: 256
+  topk_frac: 0.05             # per output row, top 5% of |W| * ||x|| (Wanda-style importance, as MathNeuro)
+  scale: 1.1
+  targets: [mlp.gate_proj, mlp.up_proj, mlp.down_proj]
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  targets: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  lr: 1.0e-4
+  epochs: 1
+  n_train: 4000
+  batch_size: 16
+  max_len: 2048
+  seed: 0
+
+# ---- Collateral ----
+heldout_sets_all: [math500, ifeval]    # evaluated for every final checkpoint (GSM8K test: see NOTES.md)
+collateral:
+  kl_texts: 256               # wikitext-103 validation passages
+  kl_tokens: 512
+
+analysis:
+  bootstrap: 10000
+  seed: 0

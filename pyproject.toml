@@ -1,0 +1,17 @@
+[project]
+name = "wsp"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "immutabledict>=4.3.1",
+    "langdetect>=1.0.9",
+    "math-verify>=0.9.0",
+    "nltk>=3.10.4",
+    "pandas>=3.1.1",
+    "peft>=0.21.2",
+    "pyarrow>=26.0.1",
+    "pytest>=9.2.0",
+    "pyyaml>=6.0.3",
+    "scipy>=1.18.1",
+    "vllm==0.33.0",
+]
