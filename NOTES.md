@@ -135,3 +135,23 @@ Dates are 2026-11-10 unless noted.
 - The partial run (35 min, 9 turns, 4 eval calls, no edit yet) is kept, unused, in
   `results/runs_discarded/editor_4B_L0_s0_overrestrictive_sandbox/`. The 4B campaign restarts from seed 0. This affects
   no completed condition (no editor run had finished).
+
+## Cache of the unedited model's practice answers (2026-11-11 10:30)
+- Run 4B-L0-s0 showed the 4B editor calling eval(ids, original=True) on the same 100 ids over and over. Each call
+  regenerated about 10 minutes of 32k-token base-model loops, and with per-(id, seed) seeding it gave the same answers each time.
+- `Tools._original` now caches the unedited model's practice answers per (id, seed) in
+  `work/cache/original_practice_seed0.jsonl`, shared by all runs. Any eval on unedited weights (original=True, or no
+  edits applied) generates only the ids not yet cached. The budget is unchanged (every call is still 1 eval call), and
+  the sampling scheme is unchanged. The only difference from regenerating is vLLM's batch-dependent numerical noise
+  (separate passes are not bit-identical), so a cached answer is an equally valid draw. The cache was pre-filled with the
+  512 M2 collect generations (same seed scheme) and the base-weight evals of run 4B-L0-s0.
+- 4B-L0-s0 itself ran without the cache. It was already 1h45m in and correct, so it was kept. The campaign restarts after
+  it finishes, and finished runs are skipped.
+
+## Runs whose final edit changes nothing (2026-11-11 18:45)
+- 4B-L0-s1 used all 50 eval calls on 18 edit attempts, each tested on 10 practice problems. It reverted every one ("no edit
+  improved") and ended DONE with n_changed = 0. Failure mode: no_edit (kept, counted in the per-seed table and mean +- SD).
+- For any run with n_changed = 0, the final weights are bit-identical to the base, so its held-out results are the base
+  model's logged results: `editors.reuse_base_heldout` copies `results/base/heldout/*_per_problem.json` (marked
+  `reused_from_base`) and writes KL = 0, instead of sampling the base model again (~4.5 h). Paired tests vs base are then
+  exactly zero, which is correct for identical weights.

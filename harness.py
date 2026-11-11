@@ -260,15 +260,11 @@ class Tools:
         self.budget.take("eval_calls")
         rows = [self.practice[i] for i in ids]
         t0 = time.time()
-        if original and self.state.current:
-            self.target.load_tensors({n: self.state.base[n] for n in self.state.current})
-            try:
-                res = self.target.generate(rows, 1, CFG["target_eval"]["seed"], partial_path=self._partial(), tag=f"eval{self.n_eval + 1}-orig")
-            finally:
-                self.target.load_tensors(dict(self.state.current))
+        tag = f"eval{self.n_eval + 1}" + ("-orig" if original else "")
+        if original or not self.state.current:          # the unedited model: answers are cached per (id, seed)
+            res = self._original(rows, tag)
         else:
-            res = self.target.generate(rows, 1, CFG["target_eval"]["seed"], partial_path=self._partial(),
-                                       tag=f"eval{self.n_eval + 1}" + ("-orig" if original else ""))
+            res = self.target.generate(rows, 1, CFG["target_eval"]["seed"], partial_path=self._partial(), tag=tag)
         out = [{"id": r["id"], "correct": bool(s[0]["correct"]), "completed": s[0]["finish"] == "stop",
                 "n_tokens": s[0]["n_tokens"], "pred": s[0]["pred"], "answer": r["answer"], "text": s[0]["text"]}
                for r, s in zip(rows, res)]
@@ -282,6 +278,34 @@ class Tools:
             with gzip.open(os.path.join(self.run_dir, "evals", f"{self.n_eval:03d}.json.gz"), "wt") as f:
                 json.dump({"summary": rec, "results": out}, f)
         return out
+
+    def _original(self, rows, tag):
+        """the unedited model's answers. Same per-(id, seed) sampling as always; answers already generated (in any run)
+        are read from work/cache/original_practice_seed<k>.jsonl.gz instead of being generated again (time only: the
+        call still costs one eval call). Missing ids are generated with the base weights and added to the cache."""
+        seed = CFG["target_eval"]["seed"]
+        path = os.path.join(E.P("work"), "cache", f"original_practice_seed{seed}.jsonl")
+        cache = {}
+        if os.path.exists(path):
+            for line in open(path):
+                r = json.loads(line)
+                cache[r["id"]] = r["sample"]
+        missing = [r for r in rows if r["id"] not in cache]
+        if missing:
+            if self.state.current:
+                self.target.load_tensors({n: self.state.base[n] for n in self.state.current})
+            try:
+                gen = self.target.generate(missing, 1, seed, partial_path=self._partial(), tag=tag + f"-new{len(missing)}")
+            finally:
+                if self.state.current:
+                    self.target.load_tensors(dict(self.state.current))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "a") as f:
+                for r, s in zip(missing, gen):
+                    cache[r["id"]] = s[0]
+                    f.write(json.dumps({"id": r["id"], "sample": s[0]}) + "\n")
+        self.cache_hits = getattr(self, "cache_hits", 0) + len(rows) - len(missing)
+        return [[cache[r["id"]]] for r in rows]
 
     def _partial(self):
         if not self.run_dir:

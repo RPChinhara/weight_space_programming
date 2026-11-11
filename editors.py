@@ -293,8 +293,11 @@ def campaign(size, levels, seeds):
                     if json.load(open(os.path.join(run_dir, "run.json"))).get("end_reason") == "crash":
                         # a harness crash is most likely a bug on our side: stop instead of burning all runs
                         raise RuntimeError(f"run crashed, campaign stopped: {run_dir} (see run.json 'error')")
-                E.run_heldout(target, os.path.join(run_dir, "heldout"), CFG["heldout_sets_all"], label=run_dir)
-                kl_from_session(session, os.path.join(run_dir, "kl.json"))
+                if session.state.changed() == 0:
+                    reuse_base_heldout(run_dir)            # final weights == base: reuse the base model's logged evals
+                else:
+                    E.run_heldout(target, os.path.join(run_dir, "heldout"), CFG["heldout_sets_all"], label=run_dir)
+                    kl_from_session(session, os.path.join(run_dir, "kl.json"))
                 session.reset_to_base()
                 del session
                 import gc, torch
@@ -303,6 +306,25 @@ def campaign(size, levels, seeds):
     finally:
         server.terminate()
         server.wait(timeout=120)
+
+
+def reuse_base_heldout(run_dir):
+    """a run whose final edit changes no entry has exactly the base weights: its held-out results ARE the base model's.
+    Copy the base model's logged per-problem files (marked reused_from_base) instead of sampling the base model again."""
+    import shutil
+    src, dst = os.path.join(E.P("results"), "base", "heldout"), os.path.join(run_dir, "heldout")
+    os.makedirs(dst, exist_ok=True)
+    summ = json.load(open(os.path.join(src, "heldout_summary.json")))
+    out = {}
+    for name in CFG["heldout_sets_all"]:
+        shutil.copy(os.path.join(src, f"{name}_per_problem.json"), os.path.join(dst, f"{name}_per_problem.json"))
+        out[name] = dict(summ[name], reused_from_base=True)
+    out["_protocol"] = dict(summ["_protocol"], label=run_dir, reused_from_base=True,
+                            note="final edit changes 0 entries; weights identical to base")
+    json.dump(out, open(os.path.join(dst, "heldout_summary.json"), "w"), indent=1)
+    json.dump({"kl_base_to_edited_per_token": 0.0, "reused_from_base": True, "note": "weights identical to base"},
+              open(os.path.join(run_dir, "kl.json"), "w"), indent=1)
+    print("no edit: reused base held-out results for", run_dir, flush=True)
 
 
 def resume_for_eval(run_dir, target):

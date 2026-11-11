@@ -275,3 +275,23 @@ def test_autograd_functional_still_blocked(tmp_path):
     for code in ("import torch.autograd.functional as AF", "torch.autograd.functional.jacobian(lambda x: x, torch.ones(2))",
                  "type(torch.ones(1)).backward"):
         assert sb.run(code)[0] == "rejected", code
+
+
+def test_original_answers_cached(tmp_path, monkeypatch):
+    """the unedited model's practice answers are generated once and then read from the cache (still 1 eval call each)."""
+    monkeypatch.setitem(E.CFG["paths"], "work", str(tmp_path / "work"))
+    sb, tools, st, b = make_sandbox(tmp_path, eval_calls=5)
+    calls = []
+    orig_generate = tools.target.generate
+    tools.target.generate = lambda rows, *a, **k: calls.append(len(rows)) or orig_generate(rows, *a, **k)
+    ids = list(PRACTICE)[:10]
+    r1 = tools.eval(ids, original=True)
+    r2 = tools.eval(ids, original=True)              # all cached
+    r3 = tools.eval(list(PRACTICE)[5:15])            # no edits applied = unedited model: 5 new ids
+    assert calls == [10, 5]
+    assert [x["correct"] for x in r1] == [x["correct"] for x in r2]
+    assert b.used["eval_calls"] == 3
+    n = "model.language_model.layers.0.mlp.down_proj.weight"
+    st.apply(n, st.get(n).float() + 0.5)
+    tools.eval(ids)                                  # edited model: generated, not cached
+    assert calls == [10, 5, 10]

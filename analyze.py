@@ -213,7 +213,8 @@ def tables(res):
     for name, c in res["conditions"].items():
         for r in c["runs"]:
             g8, ife, kl = r.get("gsm8k_test"), r.get("ifeval"), r.get("kl")
-            kl_s = f"{kl['kl_base_to_edited_per_token']:.4f} | {kl['ppl_base']:.2f} → {kl['ppl_edited']:.2f}" if kl else "- | -"
+            kl_s = ("0 (no edit) | -" if kl and kl.get("reused_from_base") else
+                    f"{kl['kl_base_to_edited_per_token']:.4f} | {kl['ppl_base']:.2f} → {kl['ppl_edited']:.2f}" if kl else "- | -")
             L.append(f"| {name} | {r['label']} | {pct(g8['acc']) if g8 else '-'} | {pct(g8['completion_rate']) if g8 else '-'} | "
                      f"{pct(ife['acc']) if ife else '-'} | {kl_s} |")
     fm = {n: c["agg"].get("failure_modes") for n, c in res["conditions"].items() if c["agg"].get("failure_modes")}
