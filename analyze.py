@@ -165,7 +165,13 @@ def main():
         res["conditions"][name] = {"runs": rows, "agg": agg}
     json.dump(res, open(os.path.join(R, "analysis.json"), "w"), indent=1, default=float)
     open(os.path.join(R, "tables.md"), "w").write(tables(res))
+    write_report(res)
     print(tables(res))
+
+
+def pv(p):
+    """p-value text; bootstrap p-values are floored at 1/n_boot."""
+    return f"<{1 / CFG['analysis']['bootstrap']:.0e}" if p <= 1 / CFG["analysis"]["bootstrap"] + 1e-12 else f"{p:.3g}"
 
 
 def pct(x):
@@ -186,8 +192,8 @@ def tables(res):
         vs = g.get("pooled_vs_scripted") or {}
         L.append(f"| {name} | {g['acc']['n']} | {pct(g['acc']['mean'])} ± {pct(g['acc']['sd'])} | {pct(g['acc']['min'])}-{pct(g['acc']['max'])} | "
                  f"{pct(g['completion_rate']['mean'])} | {pct(g['completed_only_acc']['mean'])} | "
-                 + (f"{100*vb['diff']:+.1f} [{100*vb['ci95'][0]:+.1f}, {100*vb['ci95'][1]:+.1f}] | {vb['p_boot']:.3g} | " if vb else "- | - | ")
-                 + (f"{100*vs['diff']:+.1f} | {vs['p_boot']:.3g} | " if vs else "- | - | ")
+                 + (f"{100*vb['diff']:+.1f} [{100*vb['ci95'][0]:+.1f}, {100*vb['ci95'][1]:+.1f}] | {pv(vb['p_boot'])} | " if vb else "- | - | ")
+                 + (f"{100*vs['diff']:+.1f} | {pv(vs['p_boot'])} | " if vs else "- | - | ")
                  + f"{g['pct_changed']['mean']:.4f} |")
     L.append("\n### Per run (MATH-500)\n")
     L.append("| Condition | Run | Acc % | Completion % | Completed-only acc % | Mean tokens | Δ vs base | p (boot) | p (McNemar) | Δ vs scripted | p | Entries edited | % | End | Evals used | Execs used | Failure mode |")
@@ -198,8 +204,8 @@ def tables(res):
             vb, vs = r.get("vs_base", {}), r.get("vs_scripted", {})
             bu = r.get("budget_used") or {}
             L.append(f"| {name} | {r['label']} | " + (f"{pct(m['acc'])} | {pct(m['completion_rate'])} | {pct(m['completed_only_acc'])} | {m['mean_tokens']:.0f} | " if m else "not evaluated | | | | ")
-                     + (f"{100*vb['diff']:+.1f} | {vb['p_boot']:.3g} | {vb['p_mcnemar']:.3g} | " if vb else "- | - | - | ")
-                     + (f"{100*vs['diff']:+.1f} | {vs['p_boot']:.3g} | " if vs else "- | - | ")
+                     + (f"{100*vb['diff']:+.1f} | {pv(vb['p_boot'])} | {pv(vb['p_mcnemar'])} | " if vb else "- | - | - | ")
+                     + (f"{100*vs['diff']:+.1f} | {pv(vs['p_boot'])} | " if vs else "- | - | ")
                      + f"{r['n_changed']} | {r['pct_changed']:.4f} | {r.get('end_reason', '-')} | {bu.get('eval_calls', '-')} | {bu.get('python_execs', '-')} | {r.get('failure_mode', '-')} |")
     L.append("\n### Collateral (all final checkpoints)\n")
     L.append("| Condition | Run | GSM8K test acc % | GSM8K completion % | IFEval strict prompt % | KL(base‖edit) nats/token (wikitext) | PPL base → edit |")
@@ -219,6 +225,32 @@ def tables(res):
         for n, v in fm.items():
             L.append(f"| {n} | " + " | ".join(str(v.get(k, 0)) for k in keys) + " |")
     return "\n".join(L) + "\n"
+
+
+def sources():
+    """the files every table number comes from."""
+    L = ["- Base: `results/base/heldout/` (`math500_per_problem.json`, `ifeval_per_problem.json`, `gsm8k_test_per_problem.json`)",
+         "- Baselines: `results/baselines/<name>/heldout/*_per_problem.json`, `final/manifest.json`, `kl.json`; "
+         "layer choice `results/baselines/scripted/selection.json`",
+         "- Editor runs: `results/runs/editor_<size>_<level>_s<seed>/` (`run.json`, `transcript.jsonl`, `edit_log.jsonl` + "
+         "`diffs/`, `evals/`, `final/manifest.json`, `heldout/*_per_problem.json`, `kl.json`)",
+         "- All statistics: `results/analysis.json` (written by `analyze.py` from the files above)"]
+    return "\n".join(L)
+
+
+def write_report(res):
+    """results/REPORT.md = hand-written narrative (results/report_narrative.md, if present) + generated tables."""
+    nf = os.path.join(R, "report_narrative.md")
+    narrative = open(nf).read() if os.path.exists(nf) else "_Narrative not written yet._\n"
+    te = CFG["target_eval"]
+    proto = (f"Protocol: Qwen3.5-0.8B (text), thinking on, temperature {te['sampling']['temperature']}, top_p "
+             f"{te['sampling']['top_p']}, top_k {te['sampling']['top_k']}, presence penalty {te['sampling']['presence_penalty']}, "
+             f"max {te['max_tokens']} new tokens; MATH-500 x{te['samples']['math500']}, IFEval x{te['samples']['ifeval']}, "
+             f"GSM8K test x{te['samples']['gsm8k_test']}. Paired seeds per (problem, sample). Bootstrap: "
+             f"{CFG['analysis']['bootstrap']} resamples over problems; McNemar exact on paired samples.")
+    out = ["# Weight-space programming with small editors: report", "", narrative, "", "## Generated tables", "",
+           proto, "", tables(res), "", "## Sources", "", sources(), ""]
+    open(os.path.join(R, "REPORT.md"), "w").write("\n".join(out))
 
 
 if __name__ == "__main__":
