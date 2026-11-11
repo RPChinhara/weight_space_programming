@@ -362,16 +362,19 @@ BANNED_MODULES = ("torch.optim", "torch.autograd", "torch.func", "torch.nn.utils
 BANNED_ATTRS = {"backward", "optim", "autograd", "func", "enable_grad", "set_grad_enabled", "grad", "requires_grad_",
                 "inference_mode", "load", "save", "hub", "from_file", "fromfile", "tofile", "loadtxt", "savetxt",
                 "genfromtxt", "memmap", "ctypes", "load_state_dict", "state_dict", "zero_grad", "retain_grad", "register_hook",
-                "vjp", "jvp", "jacrev", "jacfwd", "hessian", "functional", "system", "popen", "_C", "ops", "library",
-                "compile", "jit", "utils", "distributed", "multiprocessing"}
+                "vjp", "jvp", "jacrev", "jacfwd", "hessian", "system", "popen", "_C", "ops", "library",
+                "jit", "utils", "distributed", "multiprocessing"}
+# (torch.nn.functional and re.compile are allowed: no gradients or file access; torch.autograd.functional stays blocked
+#  through "autograd". type() is allowed: the dunder ban already closes type()-based escapes.)
 BANNED_NAMES = {"open", "exec", "compile", "__import__", "globals", "locals", "vars", "getattr", "setattr", "delattr",
-                "input", "breakpoint", "exit", "quit", "help", "memoryview", "__builtins__", "object", "type", "super"}
+                "input", "breakpoint", "exit", "quit", "help", "memoryview", "__builtins__", "object", "super"}
 SAFE_BUILTINS = ["abs", "all", "any", "bool", "dict", "enumerate", "filter", "float", "format", "frozenset", "hash",
                  "int", "isinstance", "issubclass", "iter", "len", "list", "map", "max", "min", "next", "pow", "print",
                  "range", "repr", "reversed", "round", "set", "slice", "sorted", "str", "sum", "tuple", "zip", "divmod",
                  "chr", "ord", "hex", "bin", "callable", "ValueError", "KeyError", "IndexError", "TypeError",
                  "Exception", "RuntimeError", "ZeroDivisionError", "StopIteration", "AssertionError", "True", "False",
-                 "None", "id", "sorted", "dir"]
+                 "None", "id", "sorted", "dir", "type", "hasattr", "AttributeError", "NameError", "NotImplementedError",
+                 "OverflowError", "ArithmeticError", "LookupError", "complex"]
 
 
 def _raise_grad(*a, **k):

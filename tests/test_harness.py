@@ -247,3 +247,31 @@ def test_diff_of_means_same_sets_raises():
         H.diff_of_means(a, a)
     with pytest.raises(ValueError):
         H.project_out(torch.randn(16, 4), torch.zeros(16), [0])
+
+
+ALLOWED_CODES = [
+    "type(torch.ones(2)).__name__ if False else str(type(torch.ones(2)))",
+    "import torch.nn.functional as F\nF.normalize(torch.randn(3, 4), dim=-1).shape",
+    "import re\nre.compile(r'\\\\d+').findall('a1b22')",
+    "hasattr(torch.ones(1), 'shape')",
+    "try:\n    torch.ones(1).nonexistent\nexcept AttributeError:\n    print('caught')",
+    "x = {'a': 1}\nisinstance(x, dict) and type(x) is dict",
+]
+
+
+@pytest.mark.parametrize("code", ALLOWED_CODES)
+def test_harmless_code_allowed(tmp_path, code):
+    if "__name__" in code:          # dunder access stays rejected even next to an allowed type()
+        sb, _, _, _ = make_sandbox(tmp_path)
+        assert sb.run(code)[0] == "rejected"
+        return
+    sb, _, _, _ = make_sandbox(tmp_path)
+    status, out = sb.run(code)
+    assert status == "ok", (code, out)
+
+
+def test_autograd_functional_still_blocked(tmp_path):
+    sb, _, _, _ = make_sandbox(tmp_path)
+    for code in ("import torch.autograd.functional as AF", "torch.autograd.functional.jacobian(lambda x: x, torch.ones(2))",
+                 "type(torch.ones(1)).backward"):
+        assert sb.run(code)[0] == "rejected", code

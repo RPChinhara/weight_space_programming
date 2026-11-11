@@ -111,3 +111,27 @@ Dates are 2026-11-10 unless noted.
 - Second attempt passed: 7 turns, 2 eval calls, 5 executions, 1 rejected (`.backward`), edit of 2 x 64 down_proj columns
   (129,284 entries changed; the rest round to the same bf16 values). The diff-log rebuild is bit-identical to the saved
   checkpoint. The held-out pipeline check on 32 MATH-500 problems ran end to end; it is a pipeline check, not a result.
+
+## Milestone 2: scripted baseline (results/baselines/{collect,scripted,random}/)
+- Collect: the base model answered 512 practice problems (256 GSM8K + 256 MATH, 1 sample): 12.1% correct, 88.3% cut,
+  completed-only 98.3%. That gave 128 looping texts (window = last 1,024 tokens) and 60 productive texts (window = 1,024
+  tokens before </think>).
+- Separation d' of looping vs productive along each layer's diff-of-means direction (MLP output): every layer separates
+  strongly; top six: 9 (7.59), 13 (7.54), 11 (7.31), 17 (7.30), 14 (7.29), 16 (7.22). Pairs of the top 4 were screened on
+  256 practice problems (disjoint from the collect set), 6 eval calls: [9,13] 15.6%, [9,17] 11.7%, [9,11] 10.5%, [11,13] 9.8%,
+  [13,17] 9.4%, [11,17] 6.6%. Chosen: [9, 13]. MIT's edit used layers 15 and 19. My practice-only rule did not select them,
+  and I did not override it.
+- Held-out MATH-500: scripted 8.55% (cut 92.2%, 128,470 entries = 0.0171%); random same-size, norm-matched edit 7.05%
+  (cut 93.4%, 125,783 entries). Base 8.05%. The scripted edit did not reproduce MIT's loop fix. Significance: see REPORT.
+
+## Sandbox fix after the first live editor run (2026-11-11 08:40)
+- The first live run (4B-L0-s0, started 07:55) showed that the AST check blocked harmless code: `type(x)` (the editor lost
+  turns 2-7 to it and then tried `import builtins`), `torch.nn.functional` (the attribute ban on "functional") and
+  `re.compile` (the attribute ban on "compile"). `hasattr`, `AttributeError`, `NameError` were also missing from the builtins.
+  These were over-broad rules on my side. None of them gives access to gradients or files.
+- Fix: those names are allowed. All gradient/file/dunder rules are unchanged (torch.autograd.functional stays blocked through
+  "autograd"). Tests added for both the new allowances and the still-blocked calls (52 pass). The rejected blocks of
+  the discarded run now pass, except `import builtins`, which stays rejected.
+- The partial run (35 min, 9 turns, 4 eval calls, no edit yet) is kept, unused, in
+  `results/runs_discarded/editor_4B_L0_s0_overrestrictive_sandbox/`. The 4B campaign restarts from seed 0. This affects
+  no completed condition (no editor run had finished).
