@@ -192,6 +192,8 @@ def diff_of_means(acts_a, acts_b):
             a = torch.cat([torch.as_tensor(x).reshape(-1, torch.as_tensor(x).shape[-1]).float() for x in a])
         return torch.as_tensor(a).float().reshape(-1, a.shape[-1])
     v = stack(acts_a).mean(0) - stack(acts_b).mean(0)
+    if not torch.isfinite(v).all() or v.norm() < 1e-8:
+        raise ValueError("diff_of_means: the two sets have (almost) the same mean; no direction")
     return v / v.norm()
 
 
@@ -200,6 +202,8 @@ def project_out(W, v, cols, alpha=1.0):
     W: [d_out, d_in] (e.g. mlp.down_proj.weight, whose columns are what each MLP neuron writes), v: [d_out]."""
     W = torch.as_tensor(W).float().clone()
     v = torch.as_tensor(v).float()
+    if not torch.isfinite(v).all() or v.norm() < 1e-8:
+        raise ValueError("project_out: v must be a finite, non-zero vector")
     v = v / v.norm()
     cols = torch.as_tensor(cols, dtype=torch.long)
     sub = W[:, cols]
@@ -259,11 +263,12 @@ class Tools:
         if original and self.state.current:
             self.target.load_tensors({n: self.state.base[n] for n in self.state.current})
             try:
-                res = self.target.generate(rows, 1, CFG["target_eval"]["seed"])
+                res = self.target.generate(rows, 1, CFG["target_eval"]["seed"], partial_path=self._partial(), tag=f"eval{self.n_eval + 1}-orig")
             finally:
                 self.target.load_tensors(dict(self.state.current))
         else:
-            res = self.target.generate(rows, 1, CFG["target_eval"]["seed"])
+            res = self.target.generate(rows, 1, CFG["target_eval"]["seed"], partial_path=self._partial(),
+                                       tag=f"eval{self.n_eval + 1}" + ("-orig" if original else ""))
         out = [{"id": r["id"], "correct": bool(s[0]["correct"]), "completed": s[0]["finish"] == "stop",
                 "n_tokens": s[0]["n_tokens"], "pred": s[0]["pred"], "answer": r["answer"], "text": s[0]["text"]}
                for r, s in zip(rows, res)]
@@ -277,6 +282,12 @@ class Tools:
             with gzip.open(os.path.join(self.run_dir, "evals", f"{self.n_eval:03d}.json.gz"), "wt") as f:
                 json.dump({"summary": rec, "results": out}, f)
         return out
+
+    def _partial(self):
+        if not self.run_dir:
+            return None
+        os.makedirs(os.path.join(self.run_dir, "evals"), exist_ok=True)
+        return os.path.join(self.run_dir, "evals", f"{self.n_eval + 1:03d}_partial.jsonl")
 
     # -- teacher-forced forward pass
     def format_prompt(self, problem):
@@ -532,6 +543,9 @@ class Session:
         self.budget = Budget(b["eval_calls"], b["eval_max_ids"], b["python_execs"])
         self.tools = Tools(self.state, self.budget, self.target, self.hf, self.tok, run_dir, seed=seed)
         self.sandbox = Sandbox(self.tools.namespace(level), self.budget, output_chars=CFG["editor"]["output_chars"])
+        if self.hf is not None:                    # compile / autotune the fla kernels once, outside the sandbox
+            for n in (16, 300, 4096):
+                self.tools.forward([" ".join(["warm"] * n)], layers=[0])
 
     def reset_to_base(self):
         """make sure both engines hold base weights (e.g. when a Target is reused between runs)."""

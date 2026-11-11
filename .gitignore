@@ -2,3 +2,9 @@ assets/
 work/
 __pycache__/
 .venv/
+*.pt
+*.log
+*.gz
+*.jsonl
+*.json
+*.safetensors

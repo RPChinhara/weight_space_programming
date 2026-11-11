@@ -232,10 +232,11 @@ DRY_SCRIPT = [
     "Let me look at the tensors.\n```python\nprint(len(list_tensors()))\nprint(list_tensors('layers.15.mlp'))\nbudget()\n```",
     "Measure the unedited model on a few practice problems.\n```python\nids = practice_ids['gsm8k'][:8]\nr0 = eval(ids)\n"
     "print(sum(x['correct'] for x in r0), sum(x['completed'] for x in r0), [x['n_tokens'] for x in r0])\n```",
-    "Collect activations on a looping and a finished answer.\n```python\nloop = [x for x in r0 if not x['completed']]\n"
-    "done = [x for x in r0 if x['completed']]\nprint(len(loop), len(done))\n"
+    "Collect activations: looping answers vs finished ones (reference solutions if none finished).\n```python\n"
+    "loop = [x for x in r0 if not x['completed']]\ndone = [x for x in r0 if x['completed']]\nprint(len(loop), len(done))\n"
     "texts_a = [format_prompt(practice[x['id']]['problem']) + x['text'] for x in (loop or r0)[:4]]\n"
-    "texts_b = [format_prompt(practice[x['id']]['problem']) + x['text'] for x in (done or r0)[:4]]\n"
+    "texts_b = ([format_prompt(practice[x['id']]['problem']) + x['text'] for x in done[:4]] or\n"
+    "           [format_prompt(practice[i]['problem']) + practice[i]['solution'] for i in ids[:4]])\n"
     "fa = forward(texts_a, layers=[15, 19], last_tokens=512)\nfb = forward(texts_b, layers=[15, 19], last_tokens=512)\n"
     "print(fa['mlp_out'][15][0].shape)\n```",
     "Project the difference-of-means direction out of 64 down_proj columns in layers 15 and 19.\n```python\n"
@@ -250,7 +251,8 @@ DRY_SCRIPT = [
 
 def dry_run():
     run_dir = os.path.join(E.P("results"), "runs", "dryrun_scripted")
-    session = H.Session(run_dir, level="L1", seed=0)
+    session = H.Session(run_dir, level="L1", seed=0,
+                        gpu_util=CFG["target_eval"]["vllm_with_editor"]["gpu_memory_utilization"])
     script = iter(DRY_SCRIPT)
     meta = {"editor": "scripted-dry-run", "level": "L1", "seed": 0}
     res = run_editor(session, lambda m, t: ({"content": next(script)}, {}), run_dir, meta)
@@ -288,6 +290,9 @@ def campaign(size, levels, seeds):
                     session = resume_for_eval(run_dir, target)        # run finished earlier, evals missing
                 else:
                     session = run_one(size, level, seed, target=target)
+                    if json.load(open(os.path.join(run_dir, "run.json"))).get("end_reason") == "crash":
+                        # a harness crash is most likely a bug on our side: stop instead of burning all runs
+                        raise RuntimeError(f"run crashed, campaign stopped: {run_dir} (see run.json 'error')")
                 E.run_heldout(target, os.path.join(run_dir, "heldout"), CFG["heldout_sets_all"], label=run_dir)
                 kl_from_session(session, os.path.join(run_dir, "kl.json"))
                 session.reset_to_base()

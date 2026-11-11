@@ -2,7 +2,7 @@
 # FROZEN after Milestone 1 (see NOTES.md): sampling, max_tokens, splits, budgets, seeds.
 # Any later change must be logged in NOTES.md with a reason, and all affected conditions rerun.
 
-frozen: false          # set to true at the end of Milestone 1
+frozen: true           # FROZEN 2026-11-10 19:50 after Milestone 1 (see NOTES.md)
 
 paths:
   target_src: assets/models/Qwen3.5-0.8B           # as downloaded (Qwen3_5ForConditionalGeneration, VL wrapper)

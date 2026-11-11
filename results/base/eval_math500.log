@@ -85,3 +85,4 @@ W1110 16:37:59.064000 551553 .venv/lib/python3.12/site-packages/torch/_library/o
 (MainProcess pid=551553) INFO 11-10 16:39:51 [hf.py:736] Detected the chat template content format to be 'openai'. You can set `--chat-template-content-format` to override this.
 (MainProcess pid=551553) WARNING 11-10 16:39:58 [jit_monitor.py:140] Triton kernel JIT compilation during inference: _topk_topp_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
 (MainProcess pid=551553) WARNING 11-10 16:39:58 [jit_monitor.py:140] Triton kernel JIT compilation during inference: _gumbel_sample_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+math500 {"n_problems": 500, "n_samples": 2000, "acc": 0.0805, "cut_share": 0.9235, "completion_rate": 0.0765, "completed_only_acc": 0.9934640522875817, "n_completed": 153, "mean_tokens": 30699.5395, "seconds": 11325, "samples_per_problem": 4}

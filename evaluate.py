@@ -16,6 +16,7 @@ import yaml
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CFG = yaml.safe_load(open(os.path.join(ROOT, "config.yaml")))
 os.environ.setdefault("CUDA_HOME", CFG["paths"]["cuda_home"])
+os.environ.setdefault("TRITON_PRINT_AUTOTUNING", "0")   # vLLM's JIT monitor turns autotune printing on otherwise (stdout)
 os.environ["PATH"] = os.path.join(CFG["paths"]["cuda_home"], "bin") + os.pathsep + os.environ.get("PATH", "")
 
 
@@ -240,32 +241,62 @@ class Target:
         return self.tok.apply_chat_template([{"role": "user", "content": text}], tokenize=False,
                                             add_generation_prompt=True, enable_thinking=te["thinking"])
 
-    def generate(self, rows, n, seed, kind="math"):
-        """rows: dicts with id, problem (math) or prompt (ifeval). Returns per row a list of n sample dicts."""
+    def generate(self, rows, n, seed, kind="math", partial_path=None, tag="gen", log_every_s=60):
+        """rows: dicts with id, problem (math) or prompt (ifeval). Returns per row a list of n sample dicts.
+        Drives the engine step by step: every finished sample is graded at once; if partial_path is given it is
+        appended there (one JSON line per sample, without text) and a progress line is printed every log_every_s."""
         from vllm import SamplingParams
+        from vllm.sampling_params import RequestOutputKind
         te = CFG["target_eval"]
-        prompts, params, owner = [], [], []
+        eng = self.llm.llm_engine
+        owner = {}
         for i, r in enumerate(rows):
             text = r["prompt"] if kind == "ifeval" else r["problem"] + "\n" + te["instruction"]
             p = self.prompt(text)
             for k in range(n):
-                prompts.append(p)
-                params.append(SamplingParams(max_tokens=te["max_tokens"], seed=req_seed(seed, r["id"], k), **te["sampling"]))
-                owner.append(i)
-        outs = self.llm.generate(prompts, params, use_tqdm=False)
-        res = [[] for _ in rows]
-        for i, o in zip(owner, outs):
-            s = o.outputs[0]
-            if s.finish_reason not in ("stop", "length"):
-                raise RuntimeError(f"unexpected finish_reason {s.finish_reason}")
-            r = rows[i]
-            rec = {"finish": s.finish_reason, "n_tokens": len(s.token_ids), "text": s.text}
-            if kind == "ifeval":
-                rec["correct"] = grade_ifeval(r, s.text)
-            else:
-                rec["pred"] = extract(s.text)
-                rec["correct"] = is_correct(rec["pred"], r["answer"])
-            res[i].append(rec)
+                rid = f"{tag}-{i}-{k}-{time.time_ns()}"
+                owner[rid] = (i, k)
+                eng.add_request(rid, p, SamplingParams(max_tokens=te["max_tokens"], seed=req_seed(seed, r["id"], k),
+                                                        output_kind=RequestOutputKind.FINAL_ONLY, **te["sampling"]))
+        res = [[None] * n for _ in rows]
+        total, done, ok, cut, toks = len(owner), 0, 0, 0, 0
+        pf = open(partial_path, "w") if partial_path else None
+        t0 = last = time.time()
+        try:
+            while eng.has_unfinished_requests():
+                for o in eng.step():
+                    if not o.finished or o.request_id not in owner:
+                        continue
+                    i, k = owner[o.request_id]
+                    s = o.outputs[0]
+                    if s.finish_reason not in ("stop", "length"):
+                        raise RuntimeError(f"unexpected finish_reason {s.finish_reason}")
+                    r = rows[i]
+                    rec = {"finish": s.finish_reason, "n_tokens": len(s.token_ids), "text": s.text}
+                    if kind == "ifeval":
+                        rec["correct"] = grade_ifeval(r, s.text)
+                    else:
+                        rec["pred"] = extract(s.text)
+                        rec["correct"] = is_correct(rec["pred"], r["answer"])
+                    res[i][k] = rec
+                    done += 1
+                    ok += rec["correct"]
+                    cut += s.finish_reason == "length"
+                    toks += rec["n_tokens"]
+                    if pf:
+                        pf.write(json.dumps({"id": r["id"], "sample": k, **{a: b for a, b in rec.items() if a != "text"}}) + "\n")
+                        pf.flush()
+                if pf and time.time() - last >= log_every_s:
+                    last = time.time()
+                    el = last - t0
+                    print(f"[{tag}] {done}/{total} done | acc so far {ok / max(done, 1):.3f} | cut so far "
+                          f"{cut / max(done, 1):.3f} | {toks / el:.0f} finished-tok/s | {el / 60:.1f} min",
+                          file=sys.__stderr__, flush=True)     # stderr: never into the editor's captured stdout
+        finally:
+            if pf:
+                pf.close()
+        if done != total:
+            raise RuntimeError(f"only {done}/{total} samples came back from the engine")
         return res
 
 
@@ -294,7 +325,8 @@ def run_heldout(target, out_dir, sets, label=""):
             continue
         rows = load_heldout(name)
         t0 = time.time()
-        res = target.generate(rows, te["samples"][name], te["seed"], kind="ifeval" if name == "ifeval" else "math")
+        res = target.generate(rows, te["samples"][name], te["seed"], kind="ifeval" if name == "ifeval" else "math",
+                              partial_path=os.path.join(out_dir, f"{name}_partial.jsonl"), tag=name)
         per = [{"id": r["id"], "samples": [{k: v for k, v in x.items() if k != "text"} for x in samp]}
                for r, samp in zip(rows, res)]
         json.dump(per, open(os.path.join(out_dir, f"{name}_per_problem.json"), "w"))

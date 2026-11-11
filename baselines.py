@@ -46,7 +46,9 @@ def collect(target=None):
     prac = E.load_practice()
     t = target or E.Target()
     t0 = time.time()
-    res = t.generate([prac[i] for i in ids], 1, CFG["target_eval"]["seed"])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    res = t.generate([prac[i] for i in ids], 1, CFG["target_eval"]["seed"],
+                     partial_path=os.path.join(os.path.dirname(path), "partial.jsonl"), tag="collect")
     gens = [{"id": i, "finish": r[0]["finish"], "n_tokens": r[0]["n_tokens"], "correct": r[0]["correct"],
              "text": r[0]["text"]} for i, r in zip(ids, res)]
     os.makedirs(os.path.dirname(path), exist_ok=True)

@@ -30,7 +30,7 @@ class FakeTarget:
     def prompt(self, text):
         return text
 
-    def generate(self, rows, n, seed, kind="math"):
+    def generate(self, rows, n, seed, kind="math", partial_path=None, tag="gen"):
         return [[{"finish": "stop", "n_tokens": 5, "text": "\\boxed{1}", "pred": "1", "correct": r["answer"] == "1"}]
                 for r in rows]
 
@@ -239,3 +239,11 @@ def test_project_out_math():
     u = v / v.norm()
     assert torch.allclose(u @ W2[:, [1, 3]], torch.zeros(2), atol=1e-5)
     assert torch.equal(W2[:, [0, 2, 4]], W[:, [0, 2, 4]])
+
+
+def test_diff_of_means_same_sets_raises():
+    a = torch.randn(5, 16)
+    with pytest.raises(ValueError):
+        H.diff_of_means(a, a)
+    with pytest.raises(ValueError):
+        H.project_out(torch.randn(16, 4), torch.zeros(16), [0])
